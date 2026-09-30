@@ -53,12 +53,13 @@ export async function runGitCommand(
     };
   } catch (err: any) {
     const stdout = (err.stdout || '').trim();
-    const stderr = (err.stderr || err.message || '').trim();
+    const stderr = (err.stderr || '').trim();
     const exitCode = typeof err.code === 'number' ? err.code : 1;
 
-    logger.debug(`Git command failed: git ${args.join(' ')}`, { exitCode, stderr });
+    logger.debug(`Git command failed: git ${args.join(' ')}`, { exitCode, stderr, stdout });
 
-    const error = new Error(`Git command failed [git ${args.join(' ')}]: ${stderr || stdout}`);
+    const rawError = [stderr, stdout].filter(Boolean).join(' | ') || err.message || 'Unknown Git error';
+    const error = new Error(`Git command failed [git ${args.join(' ')}]: ${rawError}`);
     (error as any).stdout = stdout;
     (error as any).stderr = stderr;
     (error as any).exitCode = exitCode;

@@ -100,38 +100,70 @@ export class GitConflictManager {
       // 1. Create a local clone sandbox
       await runGitCommand(['clone', '--local', '--no-hardlinks', normalized, simulationDir]);
 
-      // 2. Fetch all branches into sandbox
-      await runGitCommand(['fetch', '--all'], { cwd: simulationDir });
-
-      // 3. Ensure sourceBranch exists locally
-      try {
-        await runGitCommand(['checkout', '-B', sourceBranch, `origin/${sourceBranch}`], {
-          cwd: simulationDir,
-        });
-      } catch {
-        try {
-          await runGitCommand(['checkout', sourceBranch], { cwd: simulationDir });
-        } catch {}
-      }
-
-      // 4. Ensure targetBranch is checked out
-      try {
-        await runGitCommand(['checkout', '-B', targetBranch, `origin/${targetBranch}`], {
-          cwd: simulationDir,
-        });
-      } catch {
-        await runGitCommand(['checkout', targetBranch], { cwd: simulationDir });
-      }
-
-      // 5. Find merge base
-      const { stdout: mergeBase } = await runGitCommand(['merge-base', targetBranch, sourceBranch], {
+      // 2. Fetch all local and remote branches from parent into sandbox
+      await runGitCommand(['fetch', 'origin', '+refs/heads/*:refs/remotes/origin/*'], {
         cwd: simulationDir,
-      });
+      }).catch(() => {});
+      await runGitCommand(['fetch', 'origin', '+refs/remotes/*:refs/remotes/*'], {
+        cwd: simulationDir,
+      }).catch(() => {});
+
+      // Helper to resolve a branch name to valid git ref in the sandbox
+      const resolveBranchRef = async (name: string): Promise<string> => {
+        const cleanName = name.replace(/^remotes\//, '');
+        const candidates = [
+          name,
+          cleanName,
+          `origin/${cleanName.replace(/^origin\//, '')}`,
+          cleanName.replace(/^origin\//, ''),
+        ];
+
+        for (const candidate of candidates) {
+          try {
+            const { stdout } = await runGitCommand(['rev-parse', '--verify', candidate], {
+              cwd: simulationDir,
+            });
+            if (stdout) return candidate;
+          } catch {}
+        }
+        return name;
+      };
+
+      const targetRef = await resolveBranchRef(targetBranch);
+      const sourceRef = await resolveBranchRef(sourceBranch);
+
+      logger.info(`Resolved simulation refs: target='${targetRef}', source='${sourceRef}'`);
+
+      // 3. Checkout target branch
+      try {
+        await runGitCommand(['checkout', targetRef], { cwd: simulationDir });
+      } catch {
+        const cleanTarget = targetRef.replace(/^origin\//, '').replace(/^remotes\//, '');
+        try {
+          await runGitCommand(['checkout', '-B', cleanTarget, targetRef], { cwd: simulationDir });
+        } catch {
+          await runGitCommand(['checkout', targetBranch], { cwd: simulationDir });
+        }
+      }
+
+      // 4. Find merge base
+      let mergeBase = '';
+      try {
+        const { stdout: mb } = await runGitCommand(['merge-base', targetRef, sourceRef], {
+          cwd: simulationDir,
+        });
+        mergeBase = mb.trim();
+      } catch {
+        const { stdout: mb } = await runGitCommand(['merge-base', targetBranch, sourceBranch], {
+          cwd: simulationDir,
+        });
+        mergeBase = mb.trim();
+      }
 
       // 5. Attempt merge without committing
       let mergeOutput = '';
       try {
-        const res = await runGitCommand(['merge', '--no-commit', '--no-ff', sourceBranch], {
+        const res = await runGitCommand(['merge', '--no-commit', '--no-ff', sourceRef], {
           cwd: simulationDir,
         });
         mergeOutput = res.stdout + ' ' + res.stderr;
@@ -210,7 +242,7 @@ export class GitConflictManager {
         // Diff target against base
         let diffTargetAgainstBase = '';
         try {
-          const { stdout } = await runGitCommand(['diff', `${mergeBase}..${targetBranch}`, '--', filePath], {
+          const { stdout } = await runGitCommand(['diff', `${mergeBase}..${targetRef}`, '--', filePath], {
             cwd: simulationDir,
           });
           diffTargetAgainstBase = stdout;
@@ -219,7 +251,7 @@ export class GitConflictManager {
         // Diff source against base
         let diffSourceAgainstBase = '';
         try {
-          const { stdout } = await runGitCommand(['diff', `${mergeBase}..${sourceBranch}`, '--', filePath], {
+          const { stdout } = await runGitCommand(['diff', `${mergeBase}..${sourceRef}`, '--', filePath], {
             cwd: simulationDir,
           });
           diffSourceAgainstBase = stdout;
@@ -229,7 +261,7 @@ export class GitConflictManager {
         let sourceCommits: string[] = [];
         try {
           const { stdout } = await runGitCommand(
-            ['log', '--oneline', `${mergeBase}..${sourceBranch}`, '--', filePath],
+            ['log', '--oneline', `${mergeBase}..${sourceRef}`, '--', filePath],
             { cwd: simulationDir }
           );
           sourceCommits = stdout ? stdout.split('\n').filter(Boolean) : [];
@@ -238,7 +270,7 @@ export class GitConflictManager {
         let targetCommits: string[] = [];
         try {
           const { stdout } = await runGitCommand(
-            ['log', '--oneline', `${mergeBase}..${targetBranch}`, '--', filePath],
+            ['log', '--oneline', `${mergeBase}..${targetRef}`, '--', filePath],
             { cwd: simulationDir }
           );
           targetCommits = stdout ? stdout.split('\n').filter(Boolean) : [];
@@ -250,6 +282,7 @@ export class GitConflictManager {
           baseContent,
           oursContent,
           theirsContent,
+          conflictedContent: rawContent,
           diffTargetAgainstBase,
           diffSourceAgainstBase,
           sourceBranch,

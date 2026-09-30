@@ -21,7 +21,18 @@ export class GitCommitManager {
     const normalized = normalizeRepoPath(repoPath);
     logger.info(`Creating commit in ${normalized}: "${message}"`);
 
-    const { stdout } = await runGitCommand(['commit', '-m', message], {
+    // Check if there are staged changes
+    const { stdout: stagedChanges } = await runGitCommand(['diff', '--cached', '--name-only'], {
+      cwd: normalized,
+    }).catch(() => ({ stdout: '' }));
+
+    const commitArgs = ['commit', '-m', message];
+    if (!stagedChanges.trim()) {
+      logger.info(`No staged file differences relative to HEAD; committing with --allow-empty`);
+      commitArgs.push('--allow-empty');
+    }
+
+    await runGitCommand(commitArgs, {
       cwd: normalized,
     });
 

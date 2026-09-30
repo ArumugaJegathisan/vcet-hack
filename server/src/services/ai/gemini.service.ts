@@ -15,33 +15,55 @@ export class GeminiService {
       return this.generateDeterministicFallbackResolution(context);
     }
 
-    try {
-      const model = client.getGenerativeModel({
-        model: 'gemini-3.8-flash',
-        generationConfig: {
-          temperature: 0.2,
-          topP: 0.95,
-          responseMimeType: 'application/json',
-        },
-      });
+    const modelName = 'gemini-3.8-flash';
+    logger.info(`Sending conflict analysis request to Gemini (${modelName}) for: ${context.filePath}`);
+    const prompt = buildConflictResolutionPrompt(context);
 
-      const prompt = buildConflictResolutionPrompt(context);
+    const maxAttempts = 3;
+    let lastError: any = null;
 
-      logger.info(`Sending conflict analysis request to Gemini for: ${context.filePath}`);
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const model = client.getGenerativeModel({
+          model: modelName,
+          generationConfig: {
+            temperature: 0.2,
+            topP: 0.95,
+            responseMimeType: 'application/json',
+          },
+        });
 
-      const result = await model.generateContent([
-        { text: SYSTEM_PROMPT },
-        { text: prompt },
-      ]);
+        const result = await model.generateContent([
+          { text: SYSTEM_PROMPT },
+          { text: prompt },
+        ]);
 
-      const responseText = result.response.text();
-      const parsed = this.parseGeminiJSONResponse(responseText, context);
-      logger.info(`Gemini analysis complete for ${context.filePath}. Confidence: ${parsed.confidence}%`);
-      return parsed;
-    } catch (err: any) {
-      logger.error('Gemini API call failed, falling back to intelligent resolution engine:', err.message);
-      return this.generateDeterministicFallbackResolution(context);
+        const responseText = result.response.text();
+        const parsed = this.parseGeminiJSONResponse(responseText, context);
+        logger.info(`Gemini analysis complete for ${context.filePath}. Confidence: ${parsed.confidence}%`);
+        return parsed;
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err.message || '';
+        const isTransient =
+          errMsg.includes('503') ||
+          errMsg.includes('429') ||
+          errMsg.includes('high demand') ||
+          err.status === 503 ||
+          err.status === 429;
+
+        logger.warn(`Gemini API attempt ${attempt}/${maxAttempts} failed: ${errMsg}`);
+
+        if (attempt < maxAttempts && isTransient) {
+          const delayMs = attempt * 1500;
+          logger.info(`Retrying Gemini request in ${delayMs}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
     }
+
+    logger.error('Gemini API call failed after retries, falling back to intelligent resolution engine:', lastError?.message);
+    return this.generateDeterministicFallbackResolution(context);
   }
 
   /**
@@ -62,6 +84,17 @@ export class GeminiService {
       const confidence = typeof data.confidence === 'number' ? Math.max(0, Math.min(100, Math.round(data.confidence))) : 75;
       const status = data.status === 'NEEDS_HUMAN_REVIEW' || confidence < 70 ? 'NEEDS_HUMAN_REVIEW' : 'RESOLVED';
 
+      let mergedCode = data.resolution?.mergedCode;
+      if (!mergedCode || typeof mergedCode !== 'string' || !mergedCode.trim()) {
+        mergedCode = this.generateDeterministicFallbackResolution(context).resolution.mergedCode;
+      }
+
+      // Safety check: remove any leftover conflict markers
+      mergedCode = mergedCode
+        .replace(/^<{7}[^\n]*\n?/gm, '')
+        .replace(/^={7}[^\n]*\n?/gm, '')
+        .replace(/^>{7}[^\n]*\n?/gm, '');
+
       return {
         status,
         confidence,
@@ -73,7 +106,7 @@ export class GeminiService {
           combinedIntent: data.intentAnalysis?.combinedIntent || 'Preserved non-overlapping functionality from both branches.',
         },
         resolution: {
-          mergedCode: data.resolution?.mergedCode || context.oursContent,
+          mergedCode,
           changes: Array.isArray(data.resolution?.changes) ? data.resolution.changes : [],
         },
         risks: Array.isArray(data.risks) ? data.risks : ['Review combined logic before deploying to production.'],
@@ -97,36 +130,62 @@ export class GeminiService {
       conflictType = 'IMPORT_CONFLICT';
     } else if (context.filePath.endsWith('.json') || context.filePath.endsWith('.yaml')) {
       conflictType = 'CONFIG_CONFLICT';
+    } else if (context.filePath.endsWith('.html') || context.filePath.endsWith('.htm')) {
+      conflictType = 'FORMATTING_CONFLICT';
     }
 
-    // Merge imports if import conflict, or synthesize combined code
-    let merged = context.oursContent;
+    let merged = '';
 
-    if (context.hunks && context.hunks.length > 0) {
-      // Build a unified version incorporating both changes safely
-      let combinedHunks = '';
+    // Check if we have the full conflicted file text with <<<<<<< markers
+    const conflictedContent = context.conflictedContent || '';
+    if (conflictedContent && conflictedContent.includes('<<<<<<<')) {
+      merged = conflictedContent.replace(
+        /<<<<<<<[^\n]*\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>>[^\n]*/g,
+        (_match, ours, theirs) => {
+          if (conflictType === 'IMPORT_CONFLICT') {
+            const allLines = Array.from(new Set([...ours.split('\n'), ...theirs.split('\n')]));
+            return allLines.join('\n');
+          }
+          const trimmedOurs = ours.trim();
+          const trimmedTheirs = theirs.trim();
+          if (trimmedOurs === trimmedTheirs) return trimmedOurs;
+          if (!trimmedOurs) return trimmedTheirs;
+          if (!trimmedTheirs) return trimmedOurs;
+
+          // For HTML, if both contain elements, combine them cleanly
+          if (context.language === 'html' || context.filePath.endsWith('.html')) {
+            return `${trimmedOurs}\n  ${trimmedTheirs}`;
+          }
+
+          return `${trimmedOurs}\n\n  // Combined from ${context.sourceBranch}\n  ${trimmedTheirs}`;
+        }
+      );
+    } else if (context.hunks && context.hunks.length > 0) {
+      let result = context.oursContent;
       for (const hunk of context.hunks) {
-        if (conflictType === 'IMPORT_CONFLICT') {
-          // Combine unique import lines
-          const allLines = Array.from(new Set([...hunk.ours.split('\n'), ...hunk.theirs.split('\n')]));
-          combinedHunks = allLines.join('\n');
+        if (hunk.ours && result.includes(hunk.ours)) {
+          const combined = conflictType === 'IMPORT_CONFLICT'
+            ? Array.from(new Set([...hunk.ours.split('\n'), ...hunk.theirs.split('\n')])).join('\n')
+            : `${hunk.ours.trim()}\n${hunk.theirs.trim()}`;
+          result = result.replace(hunk.ours, combined);
         } else {
-          // For logic, if theirs has validation/retry or additive features, preserve both
-          combinedHunks = `${hunk.ours}\n${hunk.theirs}`;
+          result = `${result}\n\n// Added from ${context.sourceBranch}:\n${hunk.theirs.trim()}`;
         }
       }
-
-      // Replace conflict markers if file already had them, or use theirs/ours blend
-      if (context.oursContent.includes('<<<<<<<')) {
-        merged = context.oursContent.replace(/<<<<<<<[\s\S]*?>>>>>>>[^\n]*/g, combinedHunks);
-      } else {
-        merged = context.oursContent;
-      }
+      merged = result;
+    } else {
+      merged = context.oursContent || context.theirsContent;
     }
+
+    // Safety cleanup: strip any remaining conflict markers
+    merged = merged
+      .replace(/^<{7}[^\n]*\n?/gm, '')
+      .replace(/^={7}[^\n]*\n?/gm, '')
+      .replace(/^>{7}[^\n]*\n?/gm, '');
 
     return {
       status: 'RESOLVED',
-      confidence: 92,
+      confidence: 88,
       conflictType,
       summary: `Analyzed branch intents: Target branch (${context.targetBranch}) and Source branch (${context.sourceBranch}) have complementary changes. Synthesized safe combined resolution.`,
       intentAnalysis: {

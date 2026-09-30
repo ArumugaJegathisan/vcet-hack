@@ -26,6 +26,7 @@ export interface ConflictContext {
   baseContent: string;
   oursContent: string; // Target branch
   theirsContent: string; // Source branch
+  conflictedContent?: string; // Full content with <<<<<<< conflict markers
   diffTargetAgainstBase?: string;
   diffSourceAgainstBase?: string;
   sourceBranch: string;
