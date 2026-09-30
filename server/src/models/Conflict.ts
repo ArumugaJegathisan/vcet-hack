@@ -10,6 +10,7 @@ export interface IConflict {
   baseContent: string;
   oursContent: string;
   theirsContent: string;
+  hunks?: any[];
   diffTargetAgainstBase?: string;
   diffSourceAgainstBase?: string;
   proposedResolution: string;
@@ -22,7 +23,16 @@ export interface IConflict {
     combinedIntent: string;
     risks: string[];
     verificationSuggestions: string[];
-    changes?: Array<{ description: string; reason: string }>;
+    changes?: Array<{
+      description: string;
+      reason: string;
+      changeType?: string;
+      source?: string;
+      originalSnippet?: string;
+      resolvedSnippet?: string;
+      lineStart?: number;
+      lineEnd?: number;
+    }>;
   };
   status: ResolutionStatus;
   resolutionSource: ResolutionSource;
@@ -39,6 +49,7 @@ const ConflictSchema = new Schema<IConflict>(
     baseContent: { type: String, default: '' },
     oursContent: { type: String, default: '' },
     theirsContent: { type: String, default: '' },
+    hunks: [{ type: Schema.Types.Mixed }],
     diffTargetAgainstBase: { type: String },
     diffSourceAgainstBase: { type: String },
     proposedResolution: { type: String, default: '' },
@@ -58,6 +69,12 @@ const ConflictSchema = new Schema<IConflict>(
         {
           description: String,
           reason: String,
+          changeType: String,
+          source: String,
+          originalSnippet: String,
+          resolvedSnippet: String,
+          lineStart: Number,
+          lineEnd: Number,
         },
       ],
     },

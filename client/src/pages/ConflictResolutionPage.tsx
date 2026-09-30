@@ -27,12 +27,14 @@ export const ConflictResolutionPage: React.FC = () => {
     loadSession,
     approveConflict,
     editConflict,
+    refineWithPrompt,
     rejectConflict,
     loading,
   } = useConflicts();
 
   const [isEditing, setIsEditing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [selectedChangeIndex, setSelectedChangeIndex] = useState<number | null>(0);
   const [toast, setToast] = useState<{ type: any; title: string; message?: string } | null>(null);
   const navigate = useNavigate();
 
@@ -110,6 +112,27 @@ export const ConflictResolutionPage: React.FC = () => {
     });
   };
 
+  const handleRefineWithPrompt = async (userPrompt: string) => {
+    if (!selectedConflict) return;
+    try {
+      const result = await refineWithPrompt(selectedConflict._id, userPrompt);
+      setToast({
+        type: 'success',
+        title: 'Resolution Updated',
+        message: `AI customized resolution according to your prompt.`,
+      });
+      setSelectedChangeIndex(0);
+      return result;
+    } catch (err: any) {
+      setToast({
+        type: 'error',
+        title: 'Refinement Failed',
+        message: err.message,
+      });
+      throw err;
+    }
+  };
+
   const allApproved =
     conflicts.length > 0 &&
     conflicts.every((c) => c.status === 'APPROVED' || c.status === 'APPLIED');
@@ -185,10 +208,11 @@ export const ConflictResolutionPage: React.FC = () => {
           onSelectConflict={(c) => {
             setSelectedConflict(c);
             setIsEditing(false);
+            setSelectedChangeIndex(0);
           }}
         />
 
-        {/* Center: Monaco Diff / Editor */}
+        {/* Center: Monaco Diff / Editor / AI Highlights */}
         <div className="flex-1 min-w-0 h-full overflow-hidden">
           {selectedConflict ? (
             <ConflictViewer
@@ -196,6 +220,9 @@ export const ConflictResolutionPage: React.FC = () => {
               isEditing={isEditing}
               onEditToggle={() => setIsEditing(!isEditing)}
               onSaveModifiedResolution={handleSaveModified}
+              selectedChangeIndex={selectedChangeIndex}
+              onSelectChangeIndex={setSelectedChangeIndex}
+              onRefineConflict={handleRefineWithPrompt}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-xs text-[#8b949e]">
@@ -204,9 +231,9 @@ export const ConflictResolutionPage: React.FC = () => {
           )}
         </div>
 
-        {/* Right: AI Intent Analysis Panel */}
+        {/* Right: AI Intent Analysis Panel with Chatbot */}
         {selectedConflict && (
-          <div className="w-96 shrink-0 h-full overflow-hidden">
+          <div className="w-[420px] shrink-0 h-full overflow-hidden">
             <AIAnalysis
               conflict={selectedConflict}
               onAccept={handleAccept}
@@ -215,6 +242,9 @@ export const ConflictResolutionPage: React.FC = () => {
               onMarkReview={handleMarkReview}
               isEditing={isEditing}
               isProcessing={isProcessing}
+              onRefineConflict={handleRefineWithPrompt}
+              selectedChangeIndex={selectedChangeIndex}
+              onSelectChange={setSelectedChangeIndex}
             />
           </div>
         )}

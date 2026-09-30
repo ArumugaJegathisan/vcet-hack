@@ -85,6 +85,19 @@ export function useConflicts() {
     }
   }, []);
 
+  const refineWithPrompt = useCallback(async (conflictId: string, userPrompt: string) => {
+    try {
+      const result = await conflictApi.refineConflictWithPrompt(conflictId, userPrompt);
+      const updated = result.conflict;
+      setConflicts((prev) => prev.map((c) => (c._id === conflictId ? updated : c)));
+      setSelectedConflict((curr) => (curr?._id === conflictId ? updated : curr));
+      return result;
+    } catch (err: any) {
+      setError(err.message || 'Failed refining conflict with prompt');
+      throw err;
+    }
+  }, []);
+
   return {
     session,
     conflicts,
@@ -96,6 +109,7 @@ export function useConflicts() {
     loadSession,
     approveConflict,
     editConflict,
+    refineWithPrompt,
     rejectConflict,
     setSession,
     setConflicts,

@@ -1,6 +1,7 @@
 import { DataStore } from '../../models/store.js';
 import { gitService } from '../git/git.service.js';
 import { conflictAnalyzer } from '../ai/conflict-analyzer.js';
+import { geminiService } from '../ai/gemini.service.js';
 import { approvalService } from './approval.service.js';
 import { applyResolutionService } from './apply-resolution.service.js';
 import { logger } from '../../utils/logger.js';
@@ -105,6 +106,7 @@ export class ResolutionService {
           baseContent: context.baseContent,
           oursContent: context.oursContent,
           theirsContent: context.theirsContent,
+          hunks: context.hunks,
           diffTargetAgainstBase: context.diffTargetAgainstBase,
           diffSourceAgainstBase: context.diffSourceAgainstBase,
           proposedResolution: aiAnalysis.resolution.mergedCode,
@@ -187,6 +189,66 @@ export class ResolutionService {
   async rollback(sessionId: string) {
     return applyResolutionService.rollbackSession(sessionId);
   }
+
+  async pushSession(
+    sessionId: string,
+    options?: { remote?: string; branch?: string; force?: boolean }
+  ) {
+    return applyResolutionService.pushSession(sessionId, options);
+  }
+
+  /**
+   * Refine conflict resolution based on developer prompt ("needs")
+   * Modifies ONLY the conflicted sections according to developer instructions
+   */
+  async refineConflictWithPrompt(conflictId: string, userPrompt: string) {
+    const conflict = await DataStore.getConflict(conflictId);
+    if (!conflict) {
+      throw new Error(`Conflict ${conflictId} not found`);
+    }
+
+    const session = await DataStore.getSession(conflict.sessionId);
+
+    const context: any = {
+      filePath: conflict.filePath,
+      language: conflict.language,
+      baseContent: conflict.baseContent,
+      oursContent: conflict.oursContent,
+      theirsContent: conflict.theirsContent,
+      hunks: conflict.hunks || [],
+      targetBranch: session?.targetBranch || 'target',
+      sourceBranch: session?.sourceBranch || 'source',
+    };
+
+    const refinement = await geminiService.refineResolutionWithPrompt(
+      context,
+      conflict.proposedResolution,
+      userPrompt
+    );
+
+    const updated = await DataStore.updateConflict(conflictId, {
+      proposedResolution: refinement.mergedCode,
+      confidence: refinement.confidence,
+      resolutionSource: 'human_modified',
+      'aiExplanation.summary': refinement.summary,
+      'aiExplanation.changes': refinement.changes,
+    });
+
+    await DataStore.logOperation(
+      conflict.sessionId,
+      'PROMPT_REFINE_RESOLUTION',
+      'INFO',
+      `Applied prompt refinement for ${conflict.filePath}: "${userPrompt.slice(0, 80)}"`
+    );
+
+    return {
+      conflict: updated,
+      message: refinement.summary,
+      changes: refinement.changes,
+      mergedCode: refinement.mergedCode,
+    };
+  }
 }
+
 
 export const resolutionService = new ResolutionService();

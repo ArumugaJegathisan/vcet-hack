@@ -138,6 +138,31 @@ export class ApplyResolutionService {
     }
     return success;
   }
+
+  async pushSession(
+    sessionId: string,
+    options?: { remote?: string; branch?: string; force?: boolean }
+  ) {
+    const session = await DataStore.getSession(sessionId);
+    if (!session) throw new Error(`Session ${sessionId} not found`);
+
+    const repoPath = session.repositoryPath;
+    const output = await gitService.push(repoPath, {
+      remote: options?.remote,
+      branch: options?.branch || session.targetBranch,
+      force: options?.force,
+    });
+
+    await DataStore.logOperation(
+      sessionId,
+      'PUSH_CHANGES',
+      'SUCCESS',
+      `Pushed resolved changes to remote: ${output}`
+    );
+
+    return { success: true, output };
+  }
 }
 
 export const applyResolutionService = new ApplyResolutionService();
+

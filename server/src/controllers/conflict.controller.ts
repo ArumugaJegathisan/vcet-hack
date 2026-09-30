@@ -123,6 +123,26 @@ export class ConflictController {
     }
   }
 
+  async refineConflictWithPrompt(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { conflictId } = req.params;
+      const { userPrompt } = req.body;
+
+      if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+        throw new AppError('userPrompt is required to refine conflict resolution', 400);
+      }
+
+      const result = await resolutionService.refineConflictWithPrompt(conflictId, userPrompt.trim());
+
+      res.status(200).json({
+        success: true,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async applyResolution(req: Request, res: Response, next: NextFunction) {
     try {
       const { sessionId } = req.params;
@@ -145,6 +165,26 @@ export class ConflictController {
       res.status(200).json({
         success,
         message: success ? 'Rollback completed successfully.' : 'Rollback could not be performed.',
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  async pushCommit(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { sessionId } = req.params;
+      const { remote, branch, force } = req.body || {};
+
+      const result = await resolutionService.pushSession(sessionId, {
+        remote,
+        branch,
+        force,
+      });
+
+      res.status(200).json({
+        success: true,
+        data: result,
       });
     } catch (err) {
       next(err);

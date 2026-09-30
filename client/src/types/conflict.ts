@@ -20,6 +20,17 @@ export interface ConflictHunk {
   surroundingCode?: string;
 }
 
+export interface AIChangeDetail {
+  description: string;
+  reason: string;
+  changeType?: 'ADDITION' | 'MODIFICATION' | 'DELETION' | 'SYNTHESIS' | 'IMPORT' | 'RESOLVED_HUNK' | string;
+  source?: 'target' | 'source' | 'both_harmonized' | 'ai_synthesized' | string;
+  originalSnippet?: string;
+  resolvedSnippet?: string;
+  lineStart?: number;
+  lineEnd?: number;
+}
+
 export interface ConflictItem {
   _id: string;
   sessionId: string;
@@ -40,7 +51,7 @@ export interface ConflictItem {
     combinedIntent: string;
     risks: string[];
     verificationSuggestions: string[];
-    changes?: Array<{ description: string; reason: string }>;
+    changes?: AIChangeDetail[];
   };
   status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'APPLIED';
   resolutionSource: 'ai_approved' | 'human_modified' | 'human_required';

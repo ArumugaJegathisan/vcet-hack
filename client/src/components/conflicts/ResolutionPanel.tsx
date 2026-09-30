@@ -8,19 +8,21 @@ export interface ResolutionPanelProps {
   conflict: ConflictItem;
   onSaveModifiedResolution: (code: string) => Promise<void>;
   onCancel: () => void;
+  onRefineConflict?: (userPrompt: string) => Promise<any>;
 }
 
 export const ResolutionPanel: React.FC<ResolutionPanelProps> = ({
   conflict,
   onSaveModifiedResolution,
   onCancel,
+  onRefineConflict,
 }) => {
   const [code, setCode] = useState(conflict.proposedResolution);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     setCode(conflict.proposedResolution);
-  }, [conflict]);
+  }, [conflict.proposedResolution]);
 
   const handleResetToAI = () => {
     setCode(conflict.proposedResolution);
@@ -33,6 +35,15 @@ export const ResolutionPanel: React.FC<ResolutionPanelProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const handleChatRefine = async (userPrompt: string) => {
+    if (!onRefineConflict) return;
+    const result = await onRefineConflict(userPrompt);
+    if (result?.mergedCode) {
+      setCode(result.mergedCode);
+    }
+    return result;
   };
 
   return (
@@ -79,7 +90,7 @@ export const ResolutionPanel: React.FC<ResolutionPanelProps> = ({
       </div>
 
       {/* Monaco Code Editor */}
-      <div className="flex-1 w-full h-full min-h-[450px]">
+      <div className="flex-1 w-full h-full min-h-[350px]">
         <Editor
           height="100%"
           language={conflict.language}
@@ -100,3 +111,4 @@ export const ResolutionPanel: React.FC<ResolutionPanelProps> = ({
     </div>
   );
 };
+

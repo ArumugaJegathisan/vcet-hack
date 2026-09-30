@@ -105,6 +105,18 @@ export class GitService {
     return this.commitManager.commit(repoPath, message);
   }
 
+  async push(
+    repoPath: string,
+    options: {
+      remote?: string;
+      branch?: string;
+      setUpstream?: boolean;
+      force?: boolean;
+    } = {}
+  ) {
+    return this.commitManager.push(repoPath, options);
+  }
+
   /**
    * Safe rollback to repository state immediately prior to applying resolutions
    */

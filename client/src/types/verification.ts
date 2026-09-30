@@ -21,3 +21,10 @@ export interface ApplyResolutionResult {
   commitHash?: string;
   filesApplied: string[];
 }
+
+export interface PushResult {
+  success: boolean;
+  output?: string;
+  message?: string;
+}
+

@@ -60,4 +60,30 @@ export class GitCommitManager {
       }
     }
   }
+
+  /**
+   * Push committed changes to remote repository
+   */
+  async push(
+    repoPath: string,
+    options: {
+      remote?: string;
+      branch?: string;
+      setUpstream?: boolean;
+      force?: boolean;
+    } = {}
+  ): Promise<string> {
+    const normalized = normalizeRepoPath(repoPath);
+    const remote = options.remote || 'origin';
+    const args = ['push'];
+
+    if (options.setUpstream) args.push('-u');
+    if (options.force) args.push('--force-with-lease');
+    args.push(remote);
+    if (options.branch) args.push(options.branch);
+
+    logger.info(`Pushing changes: git ${args.join(' ')} in ${normalized}`);
+    const { stdout, stderr } = await runGitCommand(args, { cwd: normalized });
+    return (stdout || stderr).trim();
+  }
 }

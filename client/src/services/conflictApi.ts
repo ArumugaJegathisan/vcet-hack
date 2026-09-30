@@ -1,7 +1,7 @@
 import { apiClient } from './api.js';
 import { ConflictItem } from '../types/conflict.js';
 import { AnalysisSession, OperationLogItem } from '../types/resolution.js';
-import { ApplyResolutionResult } from '../types/verification.js';
+import { ApplyResolutionResult, PushResult } from '../types/verification.js';
 
 export interface AnalyzeMergeResponse {
   sessionId: string;
@@ -51,6 +51,19 @@ export const conflictApi = {
     return res.data;
   },
 
+  async refineConflictWithPrompt(
+    conflictId: string,
+    userPrompt: string
+  ): Promise<{
+    conflict: ConflictItem;
+    message: string;
+    changes: any[];
+    mergedCode: string;
+  }> {
+    const res: any = await apiClient.post(`/resolutions/${conflictId}/refine`, { userPrompt });
+    return res.data;
+  },
+
   async rejectConflict(conflictId: string, reason?: string): Promise<ConflictItem> {
     const res: any = await apiClient.post(`/resolutions/${conflictId}/reject`, { reason });
     return res.data;
@@ -58,6 +71,14 @@ export const conflictApi = {
 
   async applyResolution(sessionId: string): Promise<ApplyResolutionResult> {
     const res: any = await apiClient.post(`/merge/${sessionId}/apply`);
+    return res.data;
+  },
+
+  async pushSession(
+    sessionId: string,
+    options?: { remote?: string; branch?: string; force?: boolean }
+  ): Promise<PushResult> {
+    const res: any = await apiClient.post(`/merge/${sessionId}/push`, options || {});
     return res.data;
   },
 

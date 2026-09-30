@@ -46,6 +46,12 @@ export interface IntentAnalysis {
 export interface ChangeDescription {
   description: string;
   reason: string;
+  changeType?: 'ADDITION' | 'MODIFICATION' | 'DELETION' | 'SYNTHESIS' | 'IMPORT' | 'RESOLVED_HUNK' | 'USER_DIRECTED' | string;
+  source?: 'target' | 'source' | 'both_harmonized' | 'ai_synthesized' | 'user_directed' | string;
+  originalSnippet?: string;
+  resolvedSnippet?: string;
+  lineStart?: number;
+  lineEnd?: number;
 }
 
 export interface ResolutionData {
